@@ -1,5 +1,6 @@
 from pytest_robot import robot2py
-
+import py
+import os
 
 #def pytest_addoption(parser):
 #    parser.addoption("--robot-variable", action="store", default=None,
@@ -9,12 +10,11 @@ from pytest_robot import robot2py
 #    config.option.variables
 
 session_vars = {
-    "TARGET": "typhoonhilkeywords",
-    "RESOURCES": "resources"
 }
 
 def pytest_collect_file(parent, path):
     if path.ext == ".robot":
-        file = robot2py(path, session_vars).path
+        file = robot2py(str(path), session_vars).path
+        file = py.path.local(file)
         ihook = parent.session.gethookproxy(path)
         return ihook.pytest_pycollect_makemodule(path=file, parent=parent)

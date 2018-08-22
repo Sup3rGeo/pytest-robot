@@ -47,7 +47,6 @@ def robot2py(file_path, session_vars):
     for _import in file.imports.data:
         if _import.type == "Library":
             # Check if is module or class
-
             try:
                 spec = find_spec(_import.name)
             except ModuleNotFoundError:
@@ -105,7 +104,7 @@ def robot2py(file_path, session_vars):
 
     for test in file.testcase_table.tests:
         test_func = to_snake_case(test.name)
-        output_file_lines.append("def {}:".format(test_func))
+        output_file_lines.append("def test_{}():".format(test_func))
         for step in test.steps:
             func = to_snake_case(step.name)
             args = format_robot_args(step.args)
@@ -115,7 +114,6 @@ def robot2py(file_path, session_vars):
 
     file_name, _ = os.path.splitext(file_path)
     file_name = "{}.py".format(file_name)
-    print(file_name)
     with open(file_name, "w") as f:
         f.write("\n".join(output_file_lines))
 
