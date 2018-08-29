@@ -1,6 +1,5 @@
 import os
 import sys
-import inspect
 from collections import namedtuple
 
 from importlib import import_module
@@ -41,14 +40,6 @@ def import_all_from(lib_str, globals, args=()):
     globals.update(callables)
 
 
-
-#def import_all_from_obj(obj, globals):
-#    methods = {method_name: getattr(obj, method_name)
-#               for method_name in obj.__dir__()
-#               if (not method_name.startswith("_")) and callable(getattr(obj, method_name))}
-#    globals.update(methods)
-
-
 def robot2py(file_path, session_vars):
 
     robot_files = []
@@ -65,27 +56,6 @@ def robot2py(file_path, session_vars):
 
     for _import in file.imports.data:
         output_file_lines.append('import_all_from("{}", globals(), {})'.format(_import.name, _import.args))
-        #if _import.type == "Resource":
-        #    output_file_lines.append("from {} import *".format(_import.name))
-        #elif _import.type == "Library":
-        #    path_items = _import.name.split(".")
-        #    if _import.args:
-        #        modtype = "class"
-        #    elif len(path_items) == 1:
-        #        modtype = "module"
-        #    else:
-        #        # Could be class or module
-        #        # try module
-        #        output_file_lines.append("try:")
-        #        output_file_lines.append("    from {} import *".format(_import.name))
-        #        output_file_lines.append("except ImportError:")
-        #        # try class if error
-        #        cls_or_module = path_items.pop()
-        #        package = ".".join(path_items)
-        #        output_file_lines.append("  import {}".format(package))
-        #        args = ", ".join(_import.args)
-        #        output_file_lines.append("  import_all_from_obj({}({}), globals())".format(cls_or_module, args))
-
 
     if file.variable_table.variables:
         output_file_lines.append("\n### VARIABLES ###\n")
@@ -123,7 +93,7 @@ def robot2py(file_path, session_vars):
         output_file_lines.append("\n")
 
     file_name, _ = os.path.splitext(file_path)
-    file_name = "{}.py".format(file_name)
+    file_name = "{}.robot.py".format(file_name)
 
     source = "\n".join(output_file_lines)
 
@@ -136,14 +106,10 @@ def robot2py(file_path, session_vars):
     return namedtuple("robot2py", "source, robot_files, path")(source=source, robot_files=robot_files, path=file_name)
 
 
-
 class RobotLoader(SourceFileLoader):
     def get_data(self, path):
         if "pyc" in path:
             return SourceFileLoader.get_data(self, path)
-
-        from pytest_robot import robot2py
-        print(path)
         source = robot2py(path, {}).source
         return source
 
@@ -155,7 +121,6 @@ def upgrade_path_hook(orig_hook):
     def path_hook_for_filehandler_with_robot(path):
         filefinderobj = orig_hook(path)
         add_loader(filefinderobj)
-        #filefinderobj.invalidate_caches()
         return filefinderobj
 
     return path_hook_for_filehandler_with_robot
@@ -163,4 +128,10 @@ def upgrade_path_hook(orig_hook):
 
 # Replace original hook with upgraded one
 sys.path_hooks[-1] = upgrade_path_hook(sys.path_hooks[-1])
+
+
+# Remove all cached File finder entries
+keys = list(sys.path_importer_cache.keys())
+for key in keys:
+    sys.path_importer_cache.pop(key)
 
