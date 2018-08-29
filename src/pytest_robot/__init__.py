@@ -3,22 +3,24 @@ import sys
 from collections import namedtuple
 
 from importlib import import_module
-from importlib.machinery import FileFinder, SourceFileLoader, PathFinder
+from importlib.machinery import SourceFileLoader
 
 from robot.api import TestData
-from pytest_robot.utils import to_snake_case, format_robot_args, get_var_name
+from pytest_robot.utils import change_case, format_robot_args, get_var_name
 
 
-generate_py = False
+generate_py = True
 
+# session variables used by robot2py function.
+# should be filled by other modules
+session_vars = {}
 
-# Pytest finding a .robot file with *** Test Cases *** trigger the
-# creation of robot2py for this test module, which triggers the
-# creation of robot2py for all used resource files
 
 def import_all_from(lib_str, globals, args=()):
+    """ Used by python-converted robot files to import libraries
+    as a module or class object """
+
     path_items = lib_str.split(".")
-    # Could be class or module
     try:
         # try module
         obj = import_module(lib_str)
@@ -41,6 +43,10 @@ def import_all_from(lib_str, globals, args=()):
 
 
 def robot2py(file_path, session_vars):
+    """ Main function that generates python source from
+    robot file."""
+
+    print("ROBOT2PY with {}".format(file_path))
 
     robot_files = []
     output_file_lines = []
@@ -69,11 +75,11 @@ def robot2py(file_path, session_vars):
         output_file_lines.append("\n### KEYWORDS ###\n")
 
     for keyword in file.keywords:
-        keyword_func = to_snake_case(keyword.name)
+        keyword_func = change_case(keyword.name)
         args = format_robot_args(keyword.args.value)
         output_file_lines.append("def {}({}):".format(keyword_func, args))
         for step in keyword.steps:
-            func = to_snake_case(step.name)
+            func = change_case(step.name)
             args = format_robot_args(step.args)
             src = "{}({})".format(func, args)
             output_file_lines.append("    {}".format(src))
@@ -83,10 +89,10 @@ def robot2py(file_path, session_vars):
         output_file_lines.append("\n### TEST CASES ###\n")
 
     for test in file.testcase_table.tests:
-        test_func = to_snake_case(test.name)
+        test_func = change_case(test.name, lower=False, space="", camel2snake=False)
         output_file_lines.append("def test_{}():".format(test_func))
         for step in test.steps:
-            func = to_snake_case(step.name)
+            func = change_case(step.name)
             args = format_robot_args(step.args)
             src = "{}({})".format(func, args)
             output_file_lines.append("    {}".format(src))
@@ -116,6 +122,7 @@ class RobotLoader(SourceFileLoader):
 
 def add_loader(finder):
     finder._loaders.append(['.robot', RobotLoader])
+
 
 def upgrade_path_hook(orig_hook):
     def path_hook_for_filehandler_with_robot(path):

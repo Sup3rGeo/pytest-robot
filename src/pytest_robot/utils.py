@@ -1,23 +1,26 @@
 import re
 
 
-def to_snake_case(name):
-    name = text_to_snake_case(name)
-    name = camel_to_snake_case(name)
+def change_case(name, lower=True, space="_", camel2snake=True):
+    if lower:
+        name = name.lower()
+    name = name.replace(" ",space)
+    if camel2snake:
+        name = camel_to_snake_case(name)
     return name
+
 
 def camel_to_snake_case(name):
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
-def text_to_snake_case(name):
-    return name.lower().replace(" ","_")
 
 def is_robot_var(arg):
     return arg[:2] == "${"
 
+
 def get_var_name(string):
-    return to_snake_case(string[2:-1])
+    return change_case(string[2:-1])
 
 
 def is_number(s):
