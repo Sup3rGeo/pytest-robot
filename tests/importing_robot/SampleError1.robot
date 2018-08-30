@@ -16,7 +16,6 @@ Sample Test 1
     [Tags]      tag 1       tag 2
     [Timeout]   10
     Print   Sample Test 1!
-    Print   a
 	Sleep  5
 
 

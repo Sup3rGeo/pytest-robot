@@ -1,11 +1,13 @@
 import os
+import ast
+import astunparse
 import sys
 from collections import namedtuple
 
 from importlib import import_module
 from importlib.machinery import SourceFileLoader
 
-from robot.api import TestData
+from rflint.parser import RobotFactory
 from pytest_robot.utils import change_case, format_robot_args, get_var_name
 
 
@@ -19,6 +21,7 @@ session_vars = {}
 def import_all_from(lib_str, globals, args=()):
     """ Used by python-converted robot files to import libraries
     as a module or class object """
+    __tracebackhide__ = True
 
     path_items = lib_str.split(".")
     try:
@@ -28,11 +31,14 @@ def import_all_from(lib_str, globals, args=()):
         # try class
         cls_name = path_items.pop()
         package_name = ".".join(path_items)
-        if package_name:
-            package = import_module(package_name)
-            cls = getattr(package, cls_name)
-        else:
-            cls = getattr(globals, cls_name)
+        try:
+            if package_name:
+                package = import_module(package_name)
+                cls = getattr(package, cls_name)
+            else:
+                cls = getattr(globals, cls_name)
+        except AttributeError:
+            raise ImportError("Cannot import class/module '{}'".format(lib_str)) from None
         args = ", ".join(args)
         obj = cls(*args)
 
@@ -42,6 +48,40 @@ def import_all_from(lib_str, globals, args=()):
     globals.update(callables)
 
 
+class RobotAstModule(object):
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.module = ast.parse("")
+
+    def parse(self, src):
+        return ast.parse(src, self.filename)
+
+    def create_function(self, name, args, funclineno, argslineno):
+        node = self.parse("def {}({}):\n    pass".format(name, args)).body[0]
+        node.body.pop()
+        node.lineno = funclineno
+        node.col_offset = 1
+        # TODO: Search all args and set lineno
+        self.module.body.append(node)
+        self.current_function = node
+
+    def add_line_to_current_function(self, src, lineno):
+        node = self.parse(src).body[0]
+        node.lineno = lineno
+        node.col_offset = 1
+        self.current_function.body.append(node)
+
+    def add_line_to_module(self, src, lineno):
+        node = self.parse(src).body[0]
+        node.lineno = lineno
+        node.col_offset = 1
+        self.module.body.append(node)
+
+    def get_code(self):
+        return self.module
+
+
 def robot2py(file_path, session_vars):
     """ Main function that generates python source from
     robot file."""
@@ -49,59 +89,91 @@ def robot2py(file_path, session_vars):
     print("ROBOT2PY with {}".format(file_path))
 
     robot_files = []
-    output_file_lines = []
+    output_file = RobotAstModule(filename=file_path)
 
-    file = TestData(source=file_path)
+    file = RobotFactory(file_path)
 
-    output_file_lines.append("from pytest_robot import import_all_from")
+    output_file.add_line_to_module("from pytest_robot import import_all_from", lineno=1)
+    output_file.add_line_to_module("import pytest", lineno=1)
     for var, val in session_vars.items():
-        output_file_lines.append("{} = {}".format(var, val))
+        output_file.add_line_to_module("{} = {}".format(var, val), lineno=1)
 
-    if file.imports.data:
-        output_file_lines.append("\n### IMPORTS ###\n")
+    for table in file.tables:
+        if table.name == "settings":
+            for stmt in table.statements:
+                stmt_type, *stmt_args = stmt
+                if stmt_type == "Documentation":
+                    output_file.add_line_to_module('"""{}"""'.format("\n".join(stmt_args)), lineno=stmt.startline)
+                elif stmt_type == "Library" or stmt_type == "Resource":
+                    lib, *lib_args = stmt_args
+                    output_file.add_line_to_module('import_all_from("{}", globals(), {})'.format(lib, lib_args), lineno=stmt.startline)
+                else:
+                    raise Exception("Statement {} not supported".format(stmt))
+        elif table.name == "Keywords":
+            for keyword in table.keywords:
+                keyword_func = change_case(keyword.name, lower=False, space="", camel2snake=False)
+                args = None
+                docstring = None
+                for stmt in keyword.settings:
+                    _, stmt_type, *stmt_args = stmt
+                    if stmt_type == "[Arguments]":
+                        args = format_robot_args(stmt_args)
+                    elif stmt_type == "[Documentation]":
+                        docstring = '"""{}"""'.format("\n".join(stmt_args))
+                    else:
+                        raise Exception("Statement {} not supported. {} {}".format(stmt, stmt_type, stmt_args))
+                output_file.create_function(keyword_func, args, funclineno=keyword.linenumber, argslineno=1)
+                #if docstring:
+                #    output_file.add_line_to_current_function(docstring, lineno=1)
+                for stmt in keyword.steps:
+                    if len(stmt) == 1 and stmt[0] == "":
+                        # Null statement
+                        continue
+                    _, step_name, *step_args = stmt
+                    func = change_case(step_name)
+                    args = format_robot_args(step_args)
+                    src = "{}({})".format(func, args)
+                    output_file.add_line_to_current_function(src, lineno=1)
+        elif table.name == "Test Cases":
+            for test_case in table.testcases:
+                func = change_case(test_case.name, lower=False, space="", camel2snake=False)
+                args = ""
+                docstring = None
+                tags = None
+                for stmt in test_case.settings:
+                    _, stmt_type, *stmt_args = stmt
+                    if stmt_type == "[Arguments]":
+                        args = format_robot_args(stmt_args)
+                    elif stmt_type == "[Documentation]":
+                        docstring = '"""{}"""'.format("\n".join(stmt_args))
+                    elif stmt_type == "[Tags]":
+                        tags = stmt_args
+                    elif stmt_type == "[Timeout]":
+                        pass
+                    else:
+                        raise Exception("Statement {} not supported. {} {}".format(stmt, stmt_type, stmt_args))
+                #for tag in tags:
+                #    output_file.add_line_to_module("@pytest.mark.{}".format(tag.replace(" ","")), lineno=1)
+                #if docstring:
+                #    output_file.add_line_to_current_function(docstring, lineno=1)
+                # Todo: make decorators and docstring part of the ast function creation
+                output_file.create_function("test_{}".format(func), args, funclineno=test_case.linenumber, argslineno=1)
+                for stmt in test_case.steps:
+                    if len(stmt) == 1 and stmt[0] == "":
+                        # Null statement
+                        continue
+                    _, step_name, *step_args = stmt
+                    func = change_case(step_name)
+                    args = format_robot_args(step_args)
+                    src = "{}({})".format(func, args)
+                    output_file.add_line_to_current_function(src, lineno=stmt.startline)
 
-    for _import in file.imports.data:
-        output_file_lines.append('import_all_from("{}", globals(), {})'.format(_import.name, _import.args))
-
-    if file.variable_table.variables:
-        output_file_lines.append("\n### VARIABLES ###\n")
-
-    for variable in file.variable_table.variables:
-        name = get_var_name(variable.name)
-        value = variable.value[0].replace("${", "{").lower()
-        output_file_lines.append("{} = f'{}'".format(name, value))
-
-    if file.keywords:
-        output_file_lines.append("\n### KEYWORDS ###\n")
-
-    for keyword in file.keywords:
-        keyword_func = change_case(keyword.name)
-        args = format_robot_args(keyword.args.value)
-        output_file_lines.append("def {}({}):".format(keyword_func, args))
-        for step in keyword.steps:
-            func = change_case(step.name)
-            args = format_robot_args(step.args)
-            src = "{}({})".format(func, args)
-            output_file_lines.append("    {}".format(src))
-        output_file_lines.append("\n")
-
-    if file.testcase_table.tests:
-        output_file_lines.append("\n### TEST CASES ###\n")
-
-    for test in file.testcase_table.tests:
-        test_func = change_case(test.name, lower=False, space="", camel2snake=False)
-        output_file_lines.append("def test_{}():".format(test_func))
-        for step in test.steps:
-            func = change_case(step.name)
-            args = format_robot_args(step.args)
-            src = "{}({})".format(func, args)
-            output_file_lines.append("    {}".format(src))
-        output_file_lines.append("\n")
 
     file_name, _ = os.path.splitext(file_path)
     file_name = "{}.robot.py".format(file_name)
 
-    source = "\n".join(output_file_lines)
+    source = astunparse.unparse(output_file.get_code())
+    output_ast = output_file.get_code()
 
     if generate_py:
         with open(file_name, "w") as f:
@@ -109,15 +181,16 @@ def robot2py(file_path, session_vars):
 
     robot_files.append(file)
 
-    return namedtuple("robot2py", "source, robot_files, path")(source=source, robot_files=robot_files, path=file_name)
+    return namedtuple("robot2py", "source, robot_files, path, ast")(source=source, robot_files=robot_files, path=file_name, ast=output_ast)
 
 
 class RobotLoader(SourceFileLoader):
-    def get_data(self, path):
-        if "pyc" in path:
-            return SourceFileLoader.get_data(self, path)
-        source = robot2py(path, {}).source
-        return source
+    def get_code(self, fullname):
+        source_path = self.get_filename(fullname)
+        filename = os.path.basename(source_path)
+        module_ast = robot2py(source_path, {}).ast
+        return compile(module_ast, filename, "exec")
+
 
 
 def add_loader(finder):

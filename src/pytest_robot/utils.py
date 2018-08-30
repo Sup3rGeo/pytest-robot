@@ -4,7 +4,7 @@ import re
 def change_case(name, lower=True, space="_", camel2snake=True):
     if lower:
         name = name.lower()
-    name = name.replace(" ",space)
+    name = name.replace(" ", space)
     if camel2snake:
         name = camel_to_snake_case(name)
     return name

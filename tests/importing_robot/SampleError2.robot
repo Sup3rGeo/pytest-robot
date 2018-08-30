@@ -1,7 +1,6 @@
 *** settings ***
 Documentation   Test suite documentation
 Library     time
-Library     robot2py    arg1    arg2
 
 
 *** Keywords ***
