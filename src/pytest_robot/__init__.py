@@ -3,12 +3,13 @@ import ast
 import astunparse
 import sys
 from collections import namedtuple
+import allure
 
 from importlib import import_module
 from importlib.machinery import SourceFileLoader
 
 from rflint.parser import RobotFactory
-from pytest_robot.utils import change_case, format_robot_args, get_var_name
+from pytest_robot.utils import change_case, format_robot_args, get_var_name, robot_variants
 
 
 generate_py = True
@@ -18,7 +19,25 @@ generate_py = True
 session_vars = {}
 
 
-def import_all_from(lib_str, globals, args=()):
+def robot_step(step_name, test_globals, *args, **kwargs):
+    possible_names = robot_variants(step_name)
+
+    for possible_name in possible_names:
+        obj = test_globals.get(possible_name, None)
+        if obj is None:
+            obj = test_globals['__builtins__'].get(possible_name, None)
+        if obj is not None:
+            break
+    else:
+        raise NameError("Could not find callable with name {} ({})".format(
+            step_name,
+            possible_names
+        ))
+
+    return obj(*args, **kwargs)
+
+
+def import_all_from(lib_str, test_globals, args=()):
     """ Used by python-converted robot files to import libraries
     as a module or class object """
     __tracebackhide__ = True
@@ -36,16 +55,16 @@ def import_all_from(lib_str, globals, args=()):
                 package = import_module(package_name)
                 cls = getattr(package, cls_name)
             else:
-                cls = getattr(globals, cls_name)
+                cls = getattr(test_globals, cls_name)
         except AttributeError:
             raise ImportError("Cannot import class/module '{}'".format(lib_str)) from None
         args = ", ".join(args)
         obj = cls(*args)
 
-    callables = {name: getattr(obj, name)
+    callables = {name: allure.step(getattr(obj, name))
                 for name in obj.__dir__()
                 if (not name.startswith("_")) and callable(getattr(obj, name))}
-    globals.update(callables)
+    test_globals.update(callables)
 
 
 class RobotAstModule(object):
@@ -91,9 +110,21 @@ def robot2py(file_path, session_vars):
     robot_files = []
     output_file = RobotAstModule(filename=file_path)
 
+    def create_func(steps):
+        for stmt in steps:
+            if len(stmt) == 1 and stmt[0] == "":
+                # Null statement
+                continue
+            _, step_name, *step_args = stmt
+            args = format_robot_args(step_args)
+            src = "robot_step('{}', globals(), {})".format(step_name, args)
+            output_file.add_line_to_current_function(src, lineno=stmt.startline)
+
+
+    # Parse robot file
     file = RobotFactory(file_path)
 
-    output_file.add_line_to_module("from pytest_robot import import_all_from", lineno=1)
+    output_file.add_line_to_module("from pytest_robot import import_all_from, robot_step", lineno=1)
     output_file.add_line_to_module("import pytest", lineno=1)
     for var, val in session_vars.items():
         output_file.add_line_to_module("{} = {}".format(var, val), lineno=1)
@@ -125,15 +156,7 @@ def robot2py(file_path, session_vars):
                 output_file.create_function(keyword_func, args, funclineno=keyword.linenumber, argslineno=1)
                 #if docstring:
                 #    output_file.add_line_to_current_function(docstring, lineno=1)
-                for stmt in keyword.steps:
-                    if len(stmt) == 1 and stmt[0] == "":
-                        # Null statement
-                        continue
-                    _, step_name, *step_args = stmt
-                    func = change_case(step_name)
-                    args = format_robot_args(step_args)
-                    src = "{}({})".format(func, args)
-                    output_file.add_line_to_current_function(src, lineno=1)
+                create_func(keyword.steps)
         elif table.name == "Test Cases":
             for test_case in table.testcases:
                 func = change_case(test_case.name, lower=False, space="", camel2snake=False)
@@ -158,15 +181,7 @@ def robot2py(file_path, session_vars):
                 #    output_file.add_line_to_current_function(docstring, lineno=1)
                 # Todo: make decorators and docstring part of the ast function creation
                 output_file.create_function("test_{}".format(func), args, funclineno=test_case.linenumber, argslineno=1)
-                for stmt in test_case.steps:
-                    if len(stmt) == 1 and stmt[0] == "":
-                        # Null statement
-                        continue
-                    _, step_name, *step_args = stmt
-                    func = change_case(step_name)
-                    args = format_robot_args(step_args)
-                    src = "{}({})".format(func, args)
-                    output_file.add_line_to_current_function(src, lineno=stmt.startline)
+                create_func(test_case.steps)
 
 
     file_name, _ = os.path.splitext(file_path)

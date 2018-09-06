@@ -30,6 +30,7 @@ def is_number(s):
     except ValueError:
         return False
 
+
 def stringize(arg):
     """ If argument is not number, put it around quotes """
     if "=" in arg:
@@ -50,6 +51,44 @@ def stringize(arg):
 
     return pre_template+template.format(arg)
 
+
 def format_robot_args(arglist):
     args = map(stringize, arglist)
     return ", ".join(args)
+
+
+def robot_variants(name):
+    """List all search possibilities given a robot name"""
+
+    possibilities = []
+    # 1- the way it is (if no spaces)
+    if " " not in name:
+        possibilities.append(name)
+
+    # 2- with underscores instead of spaces
+    string = name.replace(" ", "_")
+    if string not in possibilities:
+        possibilities.append(string)
+
+    # 3- with underscores instead of spaces lower case (snake_case)
+    string = name.replace(" ", "_").lower()
+    if string not in possibilities:
+        possibilities.append(string)
+
+    # 4- without spaces (camel case for classes - first letter possibly uppercase)
+    string = name.replace(" ", "")
+    if string not in possibilities:
+        possibilities.append(string)
+
+    # 5- without spaces, first letter lowercase
+    string = name.replace(" ", "")
+    string = string[0].lower() + string[1:]
+    if string not in possibilities:
+        possibilities.append(string)
+
+    # 6- without spaces all lower case
+    string = name.replace(" ", "").lower()
+    if string not in possibilities:
+        possibilities.append(string)
+
+    return possibilities

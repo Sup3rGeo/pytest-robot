@@ -16,6 +16,7 @@ Sample Test 1
     [Timeout]   10
     Print   Sample Test 1!
     Print   a
+    Sleep   a
 	Sleep  5
 
 
