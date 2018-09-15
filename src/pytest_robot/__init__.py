@@ -34,7 +34,10 @@ def robot_step(step_name, test_globals, *args, **kwargs):
             possible_names
         ))
 
-    return obj(*args, **kwargs)
+    if getattr(obj, "__allure_step__", False):
+        return obj(*args, **kwargs)
+    else:
+        return allure.step(obj)(*args, **kwargs)
 
 
 def import_all_from(lib_str, test_globals, args=()):
@@ -61,7 +64,7 @@ def import_all_from(lib_str, test_globals, args=()):
         args = ", ".join(args)
         obj = cls(*args)
 
-    callables = {name: allure.step(getattr(obj, name))
+    callables = {name: getattr(obj, name)
                 for name in obj.__dir__()
                 if (not name.startswith("_")) and callable(getattr(obj, name))}
     test_globals.update(callables)
