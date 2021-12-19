@@ -17,6 +17,9 @@ setup(
 
     packages=find_packages('src'),
     package_dir={'': 'src'},
+    install_requires = [
+        'robotframework ~= 4.1',
+    ],
 
 
     entry_points={
